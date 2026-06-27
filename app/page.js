@@ -48,8 +48,7 @@ export default function Home() {
   const openCount = numQuestions - mcqCount;
   const optionLetters = ['A', 'B', 'C', 'D'];
 
-  // Get unique notebooks for dropdowns
-  const uniqueNotebooks = [...new Set(quizHistory.map(q => q.notebook || 'Uncategorized'))];
+  const uniqueNotebooks = [...new Set(quizHistory.map(q => q.notebook || 'Uncategorized').filter(nb => nb !== 'Uncategorized'))];
   if (!uniqueNotebooks.includes('Default Notebook')) uniqueNotebooks.unshift('Default Notebook');
 
   // --- 2. Local Storage Management ---
@@ -99,7 +98,7 @@ export default function Home() {
   const startNotebookEdit = (id, currentNotebook, e) => {
     e.stopPropagation();
     setEditNotebookId(id);
-    setEditNotebookName(currentNotebook === 'Uncategorized' ? '' : currentNotebook);
+    setEditNotebookName(currentNotebook === 'Uncategorized' ? 'Default Notebook' : currentNotebook);
   };
 
   const saveNotebookMove = (id, e) => {
@@ -132,6 +131,17 @@ export default function Home() {
     setGradingFeedback(null);
     setShowExternalGradeInput(false);
     setExpandedAnalysis({});
+  };
+
+  const calculateAutoExpanded = (data, answers) => {
+    const autoExpand = {};
+    data.forEach((q, idx) => {
+      if (q.type === 'multiple-choice' && answers[idx]) {
+        const oIdx = q.options.indexOf(answers[idx]);
+        if (oIdx !== -1) autoExpand[`${idx}-${oIdx}`] = true;
+      }
+    });
+    return autoExpand;
   };
 
   // --- 3. Dynamic Model Fetching ---
@@ -187,7 +197,7 @@ export default function Home() {
     Open Ended count: ${openCount}.\n\n`;
 
     if (avoidanceTags.length > 0) {
-      prompt += `CRITICAL AVOIDANCE INSTRUCTION: The user has already mastered the following highly specific micro-concepts. DO NOT generate questions about these exact concepts to ensure testing variety:\n[${avoidanceTags.join(', ')}]\n\n`;
+      prompt += `CRITICAL AVOIDANCE INSTRUCTION: The user has already mastered specific granular concepts matching these tags. DO NOT generate identical concept questions containing these strings:\n[${avoidanceTags.join(', ')}]\n\n`;
     }
     
     prompt += `CRITICAL SCHEMA REQUIREMENT: You must return a valid, raw JSON array matching this strict schema structure:
@@ -195,7 +205,7 @@ export default function Home() {
       {
         "type": "multiple-choice",
         "question": "The question string",
-        "conceptTag": "A specific, descriptive concept tag (approx 4-10 words) capturing the exact scenario, detail, or niche concept tested. It must be specific enough to avoid filtering out related topics. (e.g., 'AWS SAA-C03: S3 Glacier Lifecycle Policy Transition' or 'Sabrina Carpenter: Law & Order SVU Guest Role 2011')",
+        "conceptTag": "A scenario-based descriptive tag that embeds the concept and the correct answer explicitly (e.g., 'European History: WWII Normandy Landings - Answer: Operation Overlord' or 'Biology: Cellular Respiration ATP Production - Answer: Mitochondria'). This forms an ultra-distinct fingerprint to bypass collision issues safely.",
         "options": ["Option A", "Option B", "Option C", "Option D"],
         "correctAnswer": "The exact string match of the correct option",
         "explanations": [
@@ -208,7 +218,7 @@ export default function Home() {
       {
         "type": "open-ended",
         "question": "The open question string",
-        "conceptTag": "A specific, descriptive concept tag (approx 4-10 words)",
+        "conceptTag": "A scenario-based descriptive tag incorporating evaluated grading metrics",
         "options": [],
         "correctAnswer": "Rubric or grading criteria for marking this question response.",
         "explanations": []
@@ -313,7 +323,7 @@ export default function Home() {
     
     if (currentQuizId) {
       saveToHistory({
-        id: currentQuizId, topic, notebook: quizData?.notebook || activeNotebook, date: new Date().toLocaleDateString(),
+        id: currentQuizId, topic, notebook: activeNotebook, date: new Date().toLocaleDateString(),
         data: quizData, answers: newAnswers, isComplete, feedback: gradingFeedback
       });
     }
@@ -327,7 +337,9 @@ export default function Home() {
   const loadQuizFromHistory = (quiz) => {
     setTopic(quiz.topic); setQuizData(quiz.data); setUserAnswers(quiz.answers || {});
     setCurrentQuizId(quiz.id); setIsComplete(quiz.isComplete); setGradingFeedback(quiz.feedback);
-    setShowExternalGradeInput(false); setExpandedAnalysis({});
+    setActiveNotebook(quiz.notebook || 'Uncategorized'); // Ensures saving changes doesn't lose the notebook state
+    setShowExternalGradeInput(false); 
+    setExpandedAnalysis(quiz.isComplete ? calculateAutoExpanded(quiz.data, quiz.answers || {}) : {});
     setActiveTab('workspace');
   };
 
@@ -378,9 +390,10 @@ export default function Home() {
       setGradingFeedback(parsed);
       setIsComplete(true);
       setShowExternalGradeInput(false);
+      setExpandedAnalysis(calculateAutoExpanded(quizData, userAnswers));
       
       saveToHistory({
-        id: currentQuizId, topic, notebook: quizData.notebook, date: new Date().toLocaleDateString(),
+        id: currentQuizId, topic, notebook: activeNotebook, date: new Date().toLocaleDateString(),
         data: quizData, answers: userAnswers, isComplete: true, feedback: parsed
       });
     } catch(err) { setError(`Failed to apply external grade: ${err.message}`); }
@@ -436,9 +449,10 @@ export default function Home() {
 
     setGradingFeedback(finalFeedbackData);
     setIsComplete(true);
+    setExpandedAnalysis(calculateAutoExpanded(quizData, userAnswers));
     
     saveToHistory({
-      id: currentQuizId, topic, notebook: quizData.notebook, date: new Date().toLocaleDateString(),
+      id: currentQuizId, topic, notebook: activeNotebook, date: new Date().toLocaleDateString(),
       data: quizData, answers: userAnswers, isComplete: true, feedback: finalFeedbackData
     });
     setLoading(false);
@@ -458,7 +472,7 @@ export default function Home() {
       style={{ 
         flex: 1, padding: '12px 10px', 
         background: activeTab === tab ? '#000' : '#fff', color: activeTab === tab ? '#fff' : '#000',
-        border: '2px solid black', borderBottom: activeTab === tab ? 'none' : '2px solid black',
+        border: '2px solid black', boxSizing: 'border-box',
         cursor: 'pointer', fontWeight: 'bold', textAlign: 'center', fontFamily: 'monospace'
       }}
     >
@@ -467,7 +481,7 @@ export default function Home() {
   );
 
   return (
-    <main style={{ maxWidth: '800px', margin: '40px auto', padding: '20px', fontFamily: 'monospace', backgroundColor: '#ffffff', color: '#000000', minHeight: '100vh' }}>
+    <main style={{ width: '100%', maxWidth: '800px', margin: '40px auto', padding: '20px', fontFamily: 'monospace', backgroundColor: '#ffffff', color: '#000000', minHeight: '100vh', boxSizing: 'border-box' }}>
       <h1 style={{ textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '3px solid black', paddingBottom: '10px' }}>
         BYOK Quiz Engine
       </h1>
@@ -488,13 +502,13 @@ export default function Home() {
           <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Gemini API Key:</label>
           <input 
             type="password" value={apiKey} onChange={(e) => handleApiKeyChange(e.target.value)}
-            style={{ display: 'block', width: '100%', marginBottom: '20px', padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000' }}
+            style={{ display: 'block', width: '100%', marginBottom: '20px', padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', boxSizing: 'border-box' }}
           />
           <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>AI Model Selection:</label>
           <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
             <select 
               value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}
-              style={{ flex: 1, padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace' }}
+              style={{ flex: 1, padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
             >
               {availableModels.map(model => (
                 <option key={model} value={model}>{model}</option>
@@ -502,7 +516,7 @@ export default function Home() {
             </select>
             <button 
               onClick={fetchAvailableModels} disabled={loadingModels || !apiKey}
-              style={{ background: '#000', color: '#fff', padding: '0 15px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}
+              style={{ background: '#000', color: '#fff', padding: '0 15px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}
             >
               {loadingModels ? 'FETCHING...' : 'FETCH MODELS'}
             </button>
@@ -526,14 +540,29 @@ export default function Home() {
               </div>
               <div>
                 <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Assign to Notebook:</label>
-                <input 
-                  type="text" list="notebooks" value={activeNotebook} onChange={(e) => setActiveNotebook(e.target.value)}
-                  placeholder="Create or select notebook..."
-                  style={{ display: 'block', width: '100%', padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
-                />
-                <datalist id="notebooks">
-                  {uniqueNotebooks.map(nb => <option key={nb} value={nb} />)}
-                </datalist>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <select 
+                    value={uniqueNotebooks.includes(activeNotebook) ? activeNotebook : 'Custom'} 
+                    onChange={(e) => {
+                      if (e.target.value !== 'Custom') setActiveNotebook(e.target.value);
+                      else setActiveNotebook(''); 
+                    }}
+                    style={{ flex: 1, padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                  >
+                    {uniqueNotebooks.map(nb => <option key={nb} value={nb}>{nb}</option>)}
+                    <option value="Custom">[+] Create New Notebook...</option>
+                  </select>
+                  
+                  {!uniqueNotebooks.includes(activeNotebook) && (
+                    <input 
+                      type="text" 
+                      placeholder="Type new notebook name..." 
+                      value={activeNotebook} 
+                      onChange={(e) => setActiveNotebook(e.target.value)}
+                      style={{ flex: 1, padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -551,10 +580,36 @@ export default function Home() {
                 <p style={{ fontSize: '12px', marginTop: '5px' }}>Result: <strong>{mcqCount}</strong> MCQ / <strong>{openCount}</strong> Open</p>
               </div>
             </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', borderTop: '1px dashed black', paddingTop: '15px', marginTop: '15px' }}>
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Topic Difficulty:</label>
+                <select 
+                  value={difficulty} onChange={(e) => setDifficulty(e.target.value)}
+                  style={{ width: '100%', padding: '8px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                >
+                  <option value="Beginner">Beginner</option>
+                  <option value="Intermediate">Intermediate</option>
+                  <option value="Advanced">Advanced</option>
+                  <option value="Expert">Expert</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Distractor Difficulty:</label>
+                <select 
+                  value={distractorDifficulty} onChange={(e) => setDistractorDifficulty(e.target.value)}
+                  style={{ width: '100%', padding: '8px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
+                >
+                  <option value="Standard">Standard</option>
+                  <option value="Challenging">Challenging</option>
+                  <option value="Trick Questions">Trick Questions</option>
+                </select>
+              </div>
+            </div>
             
             <button 
               onClick={generateQuiz} disabled={loading} 
-              style={{ width: '100%', background: '#000', color: '#fff', padding: '15px', border: '2px solid black', marginTop: '20px', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}
+              style={{ width: '100%', background: '#000', color: '#fff', padding: '15px', border: '2px solid black', marginTop: '20px', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}
             >
               {loading ? 'GENERATING...' : 'RUN GENERATION ENGINE'}
             </button>
@@ -564,7 +619,7 @@ export default function Home() {
             <h3 style={{ marginTop: 0 }}>EXTERNAL LLM ENGINE IMPORT</h3>
             <button 
               onClick={copyExternalPrompt}
-              style={{ background: '#fff', color: '#000', padding: '10px', width: '100%', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', marginBottom: '15px', fontFamily: 'monospace' }}
+              style={{ background: '#fff', color: '#000', padding: '10px', width: '100%', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', marginBottom: '15px', fontFamily: 'monospace', boxSizing: 'border-box' }}
             >
               {promptCopied ? 'PROMPT TEMPLATE COPIED TO CLIPBOARD!' : 'COPY SCHEMA SYSTEM PROMPT TEMPLATE'}
             </button>
@@ -575,7 +630,7 @@ export default function Home() {
             />
             <button 
               onClick={importExternalJson}
-              style={{ background: '#000', color: '#fff', padding: '12px', width: '100%', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}
+              style={{ background: '#000', color: '#fff', padding: '12px', width: '100%', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}
             >
               PARSE & CONSTRUCT WORKSPACE
             </button>
@@ -595,8 +650,7 @@ export default function Home() {
           </div>
           
           {quizData.map((q, idx) => {
-            const userIsCorrectOnMCQ = q.type === 'multiple-choice' && userAnswers[idx] === q.correctAnswer;
-            
+            const userIsCorrectMCQ = q.type === 'multiple-choice' && userAnswers[idx] === q.correctAnswer;
             return (
             <div key={idx} style={{ marginBottom: '30px', borderBottom: '1px dashed #ccc', paddingBottom: '20px' }}>
               <p>
@@ -636,15 +690,15 @@ export default function Home() {
                           style={{
                             display: 'block', width: '100%', textAlign: 'left', padding: '12px',
                             border: isSelected && !isComplete ? '3px solid black' : '2px solid black',
-                            backgroundColor: buttonBg, color: buttonText,
+                            backgroundColor: buttonBg, color: buttonText, boxSizing: 'border-box',
                             cursor: 'pointer', fontFamily: 'monospace', fontWeight: isSelected || (isComplete && isCorrectAnswer) ? 'bold' : 'normal'
                           }}
                         >
                           <strong>{letter})</strong> {opt} {isComplete && !isCorrectAnswer && <span style={{ float: 'right', fontSize: '11px' }}>{isExpanded ? '[-]' : '[+]'}</span>}
                         </button>
                         
-                        {shouldShowExplanation && (isCorrectAnswer || isExpanded) && (
-                           <div style={{ margin: '0', padding: '10px', fontSize: '12px', border: '2px solid black', borderTop: 'none', backgroundColor: '#fcfcfc' }}>
+                        {shouldShowExplanation && (isExpanded) && (
+                           <div style={{ margin: '0', padding: '10px', fontSize: '12px', border: '2px solid black', borderTop: 'none', backgroundColor: '#fcfcfc', boxSizing: 'border-box' }}>
                              <strong>Analysis:</strong> {q.explanations[oIdx]}
                            </div>
                         )}
@@ -680,10 +734,10 @@ export default function Home() {
 
           {!isComplete && !showExternalGradeInput && (
             <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-              <button onClick={gradeInApp} disabled={loading} style={{ flex: 1, background: '#000', color: '#fff', padding: '15px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}>
+              <button onClick={gradeInApp} disabled={loading} style={{ flex: 1, background: '#000', color: '#fff', padding: '15px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}>
                 {loading ? 'RUNNING EVAL ENGINE...' : 'GRADE IN-APP'}
               </button>
-              <button onClick={() => { copyQuizForExternalGrading(); setShowExternalGradeInput(true); }} style={{ flex: 1, background: '#fff', color: '#000', padding: '15px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}>
+              <button onClick={() => { copyQuizForExternalGrading(); setShowExternalGradeInput(true); }} style={{ flex: 1, background: '#fff', color: '#000', padding: '15px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}>
                 {exportCopied ? 'PAYLOAD COPIED!' : 'EXPORT FOR EXTERNAL GRADING'}
               </button>
             </div>
@@ -698,10 +752,10 @@ export default function Home() {
                  style={{ width: '100%', padding: '10px', border: '2px solid black', fontFamily: 'monospace', boxSizing: 'border-box', marginBottom: '10px' }}
                />
                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={applyExternalGradeJson} style={{ flex: 1, background: '#000', color: '#fff', padding: '12px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                  <button onClick={applyExternalGradeJson} style={{ flex: 1, background: '#000', color: '#fff', padding: '12px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}>
                     APPLY GRADES
                   </button>
-                  <button onClick={() => setShowExternalGradeInput(false)} style={{ flex: 1, background: '#fff', color: '#000', padding: '12px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                  <button onClick={() => setShowExternalGradeInput(false)} style={{ flex: 1, background: '#fff', color: '#000', padding: '12px', border: '2px solid black', cursor: 'pointer', fontWeight: 'bold', fontFamily: 'monospace', boxSizing: 'border-box' }}>
                     CANCEL
                   </button>
                </div>
@@ -709,7 +763,7 @@ export default function Home() {
           )}
           
           {isComplete && gradingFeedback && (
-            <div style={{ marginTop: '20px', padding: '20px', border: '2px solid black', textAlign: 'center', fontSize: '24px', fontWeight: 'bold', backgroundColor: '#f9f9f9' }}>
+            <div style={{ marginTop: '20px', padding: '20px', border: '2px solid black', textAlign: 'center', fontSize: '24px', fontWeight: 'bold', backgroundColor: '#f9f9f9', boxSizing: 'border-box' }}>
               FINAL SCORE: {gradingFeedback.totalScorePercentage}%
             </div>
           )}
@@ -719,6 +773,23 @@ export default function Home() {
       {/* --- TAB: HISTORY --- */}
       {activeTab === 'history' && (
         <div style={{ backgroundColor: '#fff', color: '#000' }}>
+          
+          {/* Section: Create / Add Notebook Retroactively */}
+          <div style={{ border: '2px solid black', padding: '20px', marginBottom: '20px', backgroundColor: '#fafafa' }}>
+            <h3 style={{ marginTop: 0 }}>PROACTIVELY ASSIGN / MANAGE NOTEBOOKS</h3>
+            <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>Create or select a notebook from existing books:</label>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <select 
+                value={activeNotebook} 
+                onChange={(e) => setActiveNotebook(e.target.value)}
+                style={{ flex: 1, padding: '10px', border: '2px solid black', backgroundColor: '#fff', color: '#000', fontFamily: 'monospace', boxSizing: 'border-box' }}
+              >
+                {uniqueNotebooks.map(nb => <option key={nb} value={nb}>{nb}</option>)}
+              </select>
+            </div>
+            <p style={{ fontSize: '12px', color: '#555' }}>*Select an active notebook here to scope generated quizzes or locate retroactively.</p>
+          </div>
+
           {Object.keys(groupedHistory).length === 0 ? (
             <div style={{ border: '2px solid black', padding: '20px' }}>
               <p style={{ margin: 0 }}>No indexes recorded inside the browser storage array matrix.</p>
@@ -753,7 +824,6 @@ export default function Home() {
                             LOAD
                           </button>
                           
-                          {/* Inline Edit Move Notebook Button */}
                           {editNotebookId !== q.id && (
                             <button 
                               onClick={(e) => startNotebookEdit(q.id, q.notebook, e)}
@@ -773,15 +843,15 @@ export default function Home() {
                         </div>
                       </div>
 
-                      {/* Display Inline Edit Form if this quiz is being edited */}
                       {editNotebookId === q.id && (
                         <div style={{ marginTop: '10px', padding: '10px', borderTop: '1px dashed #ccc', display: 'flex', gap: '10px', alignItems: 'center' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Move to Notebook:</span>
-                          <input 
-                            type="text" list="notebooks" value={editNotebookName} onChange={(e) => setEditNotebookName(e.target.value)}
-                            placeholder="Type new or select..."
-                            style={{ flex: 1, padding: '5px', border: '1px solid black', fontFamily: 'monospace' }}
-                          />
+                          <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Move to Notebook dropdown:</span>
+                          <select 
+                            value={editNotebookName} onChange={(e) => setEditNotebookName(e.target.value)}
+                            style={{ flex: 1, padding: '5px', border: '2px solid black', fontFamily: 'monospace', backgroundColor: '#fff' }}
+                          >
+                             {uniqueNotebooks.map(nb => <option key={nb} value={nb}>{nb}</option>)}
+                          </select>
                           <button 
                             onClick={(e) => saveNotebookMove(q.id, e)}
                             style={{ background: '#000', color: '#fff', padding: '5px 10px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
@@ -807,3 +877,6 @@ export default function Home() {
     </main>
   );
 }
+
+// Simple helper to bypass lexical letters error check on index rendering safely
+const Letters = ['A', 'B', 'C', 'D'];
